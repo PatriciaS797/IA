@@ -1,0 +1,407 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "toc_visible": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    },
+    "accelerator": "GPU"
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "lHs7ywqw20Jr"
+      },
+      "source": [
+        "# Práctica 6 - Clasificador de imágenes con perceptrón\n",
+        "\n",
+        "Guarda una copia de este cuaderno en tu Google Drive para poder editarla y ejecutarla.\n",
+        "\n",
+        "El propio cuaderno será tu informe del trabajo. Puedes añadir tantas secciones de código y de texto como consideres necesario para resolver todos los ejercicios propuestos y analizar los resultados obtenidos. Una vez hayas terminado, descarga el notebook en formato ipynb y súbelo a Moodle en la tarea habilitada para la práctica con el nombre NIP_P6_MLP.ipynb\n",
+        "\n",
+        "Es **obligatorio** que se **guarden los resultados de la evaluación** de cada celda de código (para no tener que volver a ejecutarlas). Por defecto los notebooks estan configurados así (Edit→Notebook Settings → NUNCA actives: Omit code cell output when saving this notebook) "
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "E0VmxZqbSZkh"
+      },
+      "source": [
+        "Imports necesarios para ejecutar el trabajo"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "5eMdo6XcI-8G"
+      },
+      "source": [
+        "import keras\n",
+        "from keras.datasets import mnist\n",
+        "from keras.models import Sequential\n",
+        "from keras.layers import Dense, Dropout\n",
+        "from tensorflow.keras.optimizers import RMSprop, Adam, SGD\n",
+        "from keras.callbacks import EarlyStopping\n",
+        "import time\n",
+        "import numpy as np\n",
+        "import itertools\n",
+        "import numpy as np\n",
+        "import matplotlib.pyplot as plt\n",
+        "from sklearn.metrics import confusion_matrix"
+      ],
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def plot_history(history):\n",
+        "    loss_list = [s for s in history.history.keys() if 'loss' in s and 'val' not in s]\n",
+        "    val_loss_list = [s for s in history.history.keys() if 'loss' in s and 'val' in s]\n",
+        "    acc_list = [s for s in history.history.keys() if 'acc' in s and 'val' not in s]\n",
+        "    val_acc_list = [s for s in history.history.keys() if 'acc' in s and 'val' in s]\n",
+        "    \n",
+        "    if len(loss_list) == 0:\n",
+        "        print('Loss is missing in history')\n",
+        "        return \n",
+        "    \n",
+        "    ## As loss always exists\n",
+        "    epochs = range(1,len(history.history[loss_list[0]]) + 1)\n",
+        "    \n",
+        "    ## Loss\n",
+        "    fig, axs = plt.subplots(1, 2,  figsize=(12, 6))\n",
+        "    for l in loss_list:\n",
+        "        axs[0].plot(epochs, history.history[l], 'b', label='Training loss (' + str(str(format(history.history[l][-1],'.5f'))+')'))\n",
+        "    for l in val_loss_list:\n",
+        "        axs[0].plot(epochs, history.history[l], 'g', label='Validation loss (' + str(str(format(history.history[l][-1],'.5f'))+')'))\n",
+        "    \n",
+        "    axs[0].set(title='Loss', xlabel='Epochs', ylabel='Loss')\n",
+        "    axs[0].grid()\n",
+        "    axs[0].legend()\n",
+        "    \n",
+        "    ## Accuracy\n",
+        "    for l in acc_list:\n",
+        "        axs[1].plot(epochs, history.history[l], 'b', label='Training accuracy (' + str(format(history.history[l][-1],'.5f'))+')')\n",
+        "    for l in val_acc_list:    \n",
+        "        axs[1].plot(epochs, history.history[l], 'g', label='Validation accuracy (' + str(format(history.history[l][-1],'.5f'))+')')\n",
+        "\n",
+        "    axs[1].set(title='Accuracy', xlabel='Epochs', ylabel='Accuracy')\n",
+        "    axs[1].grid()\n",
+        "    axs[1].legend()\n",
+        "    plt.show()"
+      ],
+      "metadata": {
+        "id": "Vg9p39Fe1H7K"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "vaaAoKT8Sdoi"
+      },
+      "source": [
+        "Carga del dataset MNIST"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "Ju6jVmIFGdaE",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "c41d2fa8-ecca-43df-ab63-054e6f512a9f"
+      },
+      "source": [
+        "verbose = True\n",
+        "\n",
+        "print('Loading MNIST dataset...')\n",
+        "# Problem dimensions\n",
+        "img_rows, img_cols = 28, 28\n",
+        "num_pixels = img_rows * img_cols\n",
+        "num_classes = 10\n",
+        "# The data, split between train and test sets\n",
+        "(x_train, y_train), (x_test, y_test) = mnist.load_data()\n",
+        "x_train = x_train.reshape(60000, num_pixels)\n",
+        "x_test = x_test.reshape(10000, num_pixels)\n",
+        "x_train = x_train.astype('float32') / 255\n",
+        "x_test = x_test.astype('float32') / 255\n",
+        "print(x_train.shape[0], 'train samples')\n",
+        "print(x_test.shape[0], 'test samples')\n",
+        "# convert class vectors to binary class matrices\n",
+        "y_train = keras.utils.np_utils.to_categorical(y_train, num_classes)\n",
+        "y_test  = keras.utils.np_utils.to_categorical(y_test,  num_classes)\n",
+        "\n",
+        "np.random.seed(0)\n",
+        "p = np.arange(x_train.shape[0])\n",
+        "np.random.shuffle(p)\n",
+        "x_train = x_train[p]\n",
+        "y_train = y_train[p]\n"
+      ],
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Loading MNIST dataset...\n",
+            "60000 train samples\n",
+            "10000 test samples\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "j2uujVbYSO9x"
+      },
+      "source": [
+        "Ejemplo de definición de la arquitectura de una red y de los parámetros de la optimización."
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "ti5yXHPpOpAr"
+      },
+      "source": [
+        "# Función para parar cuando ya no mejora el error en los datos de validacion\n",
+        "earlystop=EarlyStopping(monitor='val_loss', patience=5, verbose=1, mode='auto')\n",
+        "\n",
+        "# Perceptron de un solo nivel\n",
+        "model = Sequential()\n",
+        "model.add(Dense(10, activation='sigmoid', input_shape=(num_pixels,)))\n",
+        "model.compile(loss='categorical_crossentropy', optimizer=Adam(),  metrics=['accuracy'])\n",
+        "model.summary()"
+      ],
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "0-a8BMyQS13B"
+      },
+      "source": [
+        "Código para entrenar la red neuronal utilizando la función FIT\n",
+        "\n",
+        "Observa como incluye un argumento para hacer separación de datos de validación\n",
+        "\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "O8Fz7j4iBRh0"
+      },
+      "source": [
+        "t0 = time.perf_counter()\n",
+        "history = model.fit(x_train, y_train,\n",
+        "                    batch_size=128,\n",
+        "                    epochs=20,\n",
+        "                    validation_split=0.1,\n",
+        "                    callbacks=[earlystop],\n",
+        "                    verbose=verbose)\n",
+        "\n",
+        "train_time = time.perf_counter() - t0\n",
+        "print('%s %.3f%s' %  ('Training time: ', train_time, 's') )\n",
+        "plot_history(history)"
+      ],
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Preguntas a responder de la celda anterior\n"
+      ],
+      "metadata": {
+        "id": "b2byyvL-zsRZ"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### 1 - ¿Qué representan los parámetros batch_size y epochs? (Respuesta dos líneas max)."
+      ],
+      "metadata": {
+        "id": "UEKTJC8ujCJS"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "[TU RESPUESTA AQUI]"
+      ],
+      "metadata": {
+        "id": "sJr2HS5HjD4I"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### 2 - Explica las dos gráficas que se muestran al finalizar el entrenamiento."
+      ],
+      "metadata": {
+        "id": "45ZQSYxVi1Xn"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "[TU RESPUESTA AQUI]"
+      ],
+      "metadata": {
+        "id": "MxJ7x10TjJC_"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "G90GpsJ5UKBI"
+      },
+      "source": [
+        "Evaluación de la red"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def plot_confusion_matrix(cm, classes,\n",
+        "                          normalize=False,\n",
+        "                          title='Confusion matrix',\n",
+        "                          cmap=plt.cm.Blues):\n",
+        "    \"\"\"\n",
+        "    This function prints and plots the confusion matrix.\n",
+        "    Normalization can be applied by setting `normalize=True`.\n",
+        "    \"\"\"\n",
+        "    if normalize:\n",
+        "        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]\n",
+        "        print(\"Normalized confusion matrix\")\n",
+        "    else:\n",
+        "        print('Confusion matrix, without normalization')\n",
+        "\n",
+        "    #print(cm)\n",
+        "\n",
+        "    plt.imshow(cm, interpolation='nearest', cmap=cmap)\n",
+        "    plt.title(title)\n",
+        "    plt.colorbar()\n",
+        "    tick_marks = np.arange(len(classes))\n",
+        "    plt.xticks(tick_marks, classes, rotation=45)\n",
+        "    plt.yticks(tick_marks, classes)\n",
+        "\n",
+        "    fmt = '.2f' if normalize else 'd'\n",
+        "    thresh = cm.max() / 2.\n",
+        "    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):\n",
+        "        plt.text(j, i, format(cm[i, j], fmt),\n",
+        "                 horizontalalignment=\"center\",\n",
+        "                 color=\"white\" if cm[i, j] > thresh else \"black\")\n",
+        "\n",
+        "    plt.ylabel('True label')\n",
+        "    plt.xlabel('Predicted label')\n",
+        "    plt.show()\n",
+        "    #plt.tight_layout()\n",
+        "\n",
+        "\n",
+        "def plot_mnist_confusion_matrix(y_test, y_pred, normalize=False):\n",
+        "    class_names=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]\n",
+        "    y_tst = [np.argmax(y) for y in y_test]\n",
+        "    y_prd = [np.argmax(y) for y in y_pred]\n",
+        "\n",
+        "    cnf_matrix = confusion_matrix(y_tst, y_prd)\n",
+        "\n",
+        "    plt.figure()\n",
+        "    plot_confusion_matrix(cnf_matrix, classes=class_names,\n",
+        "                          normalize=normalize)"
+      ],
+      "metadata": {
+        "id": "nN18_OsNtrna"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "NDeOtoAKTGyy"
+      },
+      "source": [
+        "# Evaluar la red\n",
+        "train_score = model.evaluate(x_train, y_train, verbose=0)\n",
+        "test_score = model.evaluate(x_test, y_test, verbose=0)\n",
+        "print('%s %2.2f%s' % ('Accuracy train: ', 100*train_score[1], '%' ))\n",
+        "print('%s %2.2f%s' % ('Accuracy test:  ', 100*test_score[1], '%'))\n",
+        "\n",
+        "y_pred = model.predict(x_test)\n",
+        "plot_mnist_confusion_matrix(y_test, y_pred, normalize=False)\n",
+        "# Standard confusion matrix plot\n",
+        "#cm=confusion_matrix(np.argmax(y_test, axis=1),np.argmax(y_pred, axis=1))\n",
+        "#plt.imshow(cm, cmap='Blues')"
+      ],
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Preguntas a responder de la celda anterior"
+      ],
+      "metadata": {
+        "id": "mJzrq_VbjdeJ"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### 1 - Explica la gráfica que se muestra"
+      ],
+      "metadata": {
+        "id": "uHA235xRjeHl"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "[TU RESPUESTA AQUI]"
+      ],
+      "metadata": {
+        "id": "WYDmPIAOji7Z"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "u1Zc5brWUHqQ"
+      },
+      "source": [
+        "## TRABAJO PRÁCTICO \n",
+        "\n",
+        "\n",
+        "**Trabajo práctico**: incluye a continuación las secciones de código para probar las diferentes redes. \n",
+        "No incluyas una sección para cada red que pruebes. El notebook que entregues deberá incluir:\n",
+        "\n",
+        "\n",
+        "1.   La mejor red obtenida para el caso de una capa\n",
+        "2.   La mejor red obtenida para el caso de dos capas\n",
+        "3.   La mejor red obtenida para el caso de tres capas\n",
+        "4.   Ejemplo de red en la que se produzca sobreajuste al entrenar\n",
+        "5.   Modificación de la red anterior utilizando técnicas para evitar el sobreajuste\n",
+        "6.   Incluye en una sección de texto una tabla en la que aparezca resumido el conjunto de pruebas realizado y los resultados obtenidos en cada caso (nº capas, nº neuronas, accuracy, técnicas de sobreajuste, etc.). Incluye en esta sección también las conclusiones obtenidas del trabajo.\n",
+        "7.   Recuerda mostrar y comentar algún ejemplo de imagen mal clasificada por la red que mejor se comporte."
+      ]
+    }
+  ]
+}
